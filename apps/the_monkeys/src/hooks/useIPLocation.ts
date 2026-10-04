@@ -98,7 +98,7 @@ export const useIPLocation = (): IPLocationData => {
       }
     };
 
-    const useFallback = () => {
+    const fallbackToCachedOrIp = () => {
       if (cached) {
         applyLocation(cached);
       } else {
@@ -107,7 +107,7 @@ export const useIPLocation = (): IPLocationData => {
     };
 
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      useFallback();
+      fallbackToCachedOrIp();
       return () => {
         cancelled = true;
       };
@@ -117,13 +117,13 @@ export const useIPLocation = (): IPLocationData => {
       (position) => {
         const { latitude, longitude } = position.coords;
         if (!isValidLocationCoordinates(latitude, longitude)) {
-          useFallback();
+          fallbackToCachedOrIp();
           return;
         }
         void reverseGeocode(latitude, longitude)
           .then((place) => {
             if (!place?.city || !place.country) {
-              useFallback();
+              fallbackToCachedOrIp();
               return;
             }
             applyLocation({
@@ -137,9 +137,9 @@ export const useIPLocation = (): IPLocationData => {
               updatedAt: Date.now(),
             });
           })
-          .catch(() => useFallback());
+          .catch(() => fallbackToCachedOrIp());
       },
-      () => useFallback(),
+      () => fallbackToCachedOrIp(),
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }
     );
 
