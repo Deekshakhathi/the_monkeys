@@ -4,14 +4,12 @@ import { useEffect, useState } from 'react';
 
 import {
   CachedIpLocation,
-  isValidLocationCoordinates,
   readCachedIpLocation,
   writeCachedIpLocation,
 } from '@/lib/ipLocationCache';
 
 export interface IPLocationData {
   city: string;
-  state: string;
   country: string;
   countryName: string;
   latitude: number;
@@ -22,34 +20,11 @@ export interface IPLocationData {
 
 const emptyLocation: CachedIpLocation = {
   city: '',
-  state: '',
   country: '',
   countryName: '',
   latitude: 0,
   longitude: 0,
-  source: 'ip',
-  updatedAt: 0,
 };
-
-type ReverseGeocodeResponse = {
-  city?: string;
-  state?: string;
-  country?: string;
-  countryName?: string;
-};
-
-async function reverseGeocode(
-  latitude: number,
-  longitude: number
-): Promise<ReverseGeocodeResponse | null> {
-  const params = new URLSearchParams({
-    lat: String(latitude),
-    lon: String(longitude),
-  });
-  const response = await fetch(`/api/reverse-geocode?${params.toString()}`);
-  if (!response.ok) return null;
-  return (await response.json()) as ReverseGeocodeResponse;
-}
 
 export const useIPLocation = (): IPLocationData => {
   const [data, setData] = useState<CachedIpLocation>(emptyLocation);
@@ -57,95 +32,38 @@ export const useIPLocation = (): IPLocationData => {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
     const cached = readCachedIpLocation();
-
-    const applyLocation = (location: CachedIpLocation) => {
-      if (cancelled) return;
-      setData(location);
-      setError(false);
+    if (cached) {
+      setData(cached);
       setIsLoading(false);
-      writeCachedIpLocation(location);
-    };
+      return;
+    }
 
-    const fetchIpLocation = async () => {
+    const fetchLocation = async () => {
       try {
         const res = await fetch('https://ipapi.co/json/');
         if (!res.ok) throw new Error('Failed to fetch location');
         const json = await res.json();
-        const latitude = Number(json.latitude);
-        const longitude = Number(json.longitude);
-        if (!isValidLocationCoordinates(latitude, longitude)) {
-          throw new Error('IP provider returned invalid coordinates');
-        }
 
-        applyLocation({
+        const locData: CachedIpLocation = {
           city: json.city || '',
-          state: json.region || '',
           country: json.country || '',
           countryName: json.country_name || '',
-          latitude,
-          longitude,
-          source: 'ip',
-          updatedAt: Date.now(),
-        });
+          latitude: json.latitude || 0,
+          longitude: json.longitude || 0,
+        };
+
+        setData(locData);
+        writeCachedIpLocation(locData);
       } catch (err) {
         console.error('IP location detection failed:', err);
-        if (!cancelled) {
-          setError(true);
-          setIsLoading(false);
-        }
+        setError(true);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    const useFallback = () => {
-      if (cached) {
-        applyLocation(cached);
-      } else {
-        void fetchIpLocation();
-      }
-    };
-
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      useFallback();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        if (!isValidLocationCoordinates(latitude, longitude)) {
-          useFallback();
-          return;
-        }
-        void reverseGeocode(latitude, longitude)
-          .then((place) => {
-            if (!place?.city || !place.country) {
-              useFallback();
-              return;
-            }
-            applyLocation({
-              city: place.city,
-              state: place.state || '',
-              country: place.country,
-              countryName: place.countryName || '',
-              latitude,
-              longitude,
-              source: 'gps',
-              updatedAt: Date.now(),
-            });
-          })
-          .catch(() => useFallback());
-      },
-      () => useFallback(),
-      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }
-    );
-
-    return () => {
-      cancelled = true;
-    };
+    fetchLocation();
   }, []);
 
   return { ...data, isLoading, error };
